@@ -17,9 +17,9 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/keybase/go-triplesec/sha3"
 	"golang.org/x/crypto/salsa20"
 	"golang.org/x/crypto/scrypt"
+	"golang.org/x/crypto/sha3"
 	"golang.org/x/crypto/twofish"
 )
 
@@ -32,12 +32,12 @@ type Cipher struct {
 }
 
 func scrub(b []byte) {
-	for i, _ := range b {
+	for i := range b {
 		b[i] = 0
 	}
 }
 
-// A Cipher is an instance of TripleSec using a particular key and
+// Cipher is an instance of TripleSec using a particular key and
 // a particular salt
 func NewCipher(passphrase []byte, salt []byte) (*Cipher, error) {
 	if salt != nil && len(salt) != SaltLen {
@@ -149,7 +149,7 @@ func (c *Cipher) Encrypt(src []byte) (dst []byte, err error) {
 	cipherKeys := dk[macKeyLen*2:]
 
 	// The allocation over here can be made better
-	encryptedData, err := encrypt_data(src, cipherKeys)
+	encryptedData, err := encryptData(src, cipherKeys)
 	if err != nil {
 		return
 	}
@@ -157,7 +157,7 @@ func (c *Cipher) Encrypt(src []byte) (dst []byte, err error) {
 	authenticatedData := make([]byte, 0, buf.Len()+len(encryptedData))
 	authenticatedData = append(authenticatedData, buf.Bytes()...)
 	authenticatedData = append(authenticatedData, encryptedData...)
-	macsOutput := generate_macs(authenticatedData, macKeys)
+	macsOutput := generateMacs(authenticatedData, macKeys)
 
 	_, err = buf.Write(macsOutput)
 	if err != nil {
@@ -176,26 +176,26 @@ func (c *Cipher) Encrypt(src []byte) (dst []byte, err error) {
 	return buf.Bytes(), nil
 }
 
-func encrypt_data(plain, keys []byte) ([]byte, error) {
+func encryptData(plain, keys []byte) ([]byte, error) {
 	var iv, key []byte
 	var block cipher.Block
 	var stream cipher.Stream
 
-	iv_offset := TotalIVLen
-	res := make([]byte, len(plain)+iv_offset)
+	ivOffset := TotalIVLen
+	res := make([]byte, len(plain)+ivOffset)
 
-	iv = res[iv_offset-SalsaIVLen : iv_offset]
+	iv = res[ivOffset-SalsaIVLen : ivOffset]
 	_, err := rand.Read(iv)
 	if err != nil {
 		return nil, err
 	}
 	// For some reason salsa20 API is different
-	key_array := new([32]byte)
-	copy(key_array[:], keys[cipherKeyLen*2:])
-	salsa20.XORKeyStream(res[iv_offset:], plain, iv, key_array)
-	iv_offset -= SalsaIVLen
+	keyArray := new([32]byte)
+	copy(keyArray[:], keys[cipherKeyLen*2:])
+	salsa20.XORKeyStream(res[ivOffset:], plain, iv, keyArray)
+	ivOffset -= SalsaIVLen
 
-	iv = res[iv_offset-IVLen : iv_offset]
+	iv = res[ivOffset-IVLen : ivOffset]
 	_, err = rand.Read(iv)
 	if err != nil {
 		return nil, err
@@ -206,10 +206,10 @@ func encrypt_data(plain, keys []byte) ([]byte, error) {
 		return nil, err
 	}
 	stream = cipher.NewCTR(block, iv)
-	stream.XORKeyStream(res[iv_offset:], res[iv_offset:])
-	iv_offset -= IVLen
+	stream.XORKeyStream(res[ivOffset:], res[ivOffset:])
+	ivOffset -= IVLen
 
-	iv = res[iv_offset-IVLen : iv_offset]
+	iv = res[ivOffset-IVLen : ivOffset]
 	_, err = rand.Read(iv)
 	if err != nil {
 		return nil, err
@@ -220,17 +220,17 @@ func encrypt_data(plain, keys []byte) ([]byte, error) {
 		return nil, err
 	}
 	stream = cipher.NewCTR(block, iv)
-	stream.XORKeyStream(res[iv_offset:], res[iv_offset:])
-	iv_offset -= IVLen
+	stream.XORKeyStream(res[ivOffset:], res[ivOffset:])
+	ivOffset -= IVLen
 
-	if iv_offset != 0 {
-		panic(fmt.Errorf("something went terribly wrong: iv_offset final value non-zero"))
+	if ivOffset != 0 {
+		panic(fmt.Errorf("something went terribly wrong: ivOffset final value non-zero"))
 	}
 
 	return res, nil
 }
 
-func generate_macs(data, keys []byte) []byte {
+func generateMacs(data, keys []byte) []byte {
 	res := make([]byte, 0, 64*2)
 
 	key := keys[:macKeyLen]
@@ -239,7 +239,7 @@ func generate_macs(data, keys []byte) []byte {
 	res = mac.Sum(res)
 
 	key = keys[macKeyLen:]
-	mac = hmac.New(sha3.NewKeccak512, key)
+	mac = hmac.New(sha3.New512, key)
 	mac.Write(data)
 	res = mac.Sum(res)
 
@@ -263,9 +263,9 @@ func (c *Cipher) Decrypt(src []byte) (res []byte, err error) {
 		return
 	}
 
-	v_b := bytes.NewBuffer(src[4:8])
+	vB := bytes.NewBuffer(src[4:8])
 	var version uint32
-	err = binary.Read(v_b, binary.BigEndian, &version)
+	err = binary.Read(vB, binary.BigEndian, &version)
 	if err != nil {
 		err = CorruptionError{err.Error()}
 		return
@@ -295,14 +295,14 @@ func (c *Cipher) Decrypt(src []byte) (res []byte, err error) {
 	authenticatedData = append(authenticatedData, src[:24]...)
 	authenticatedData = append(authenticatedData, encryptedData...)
 
-	if !hmac.Equal(macs, generate_macs(authenticatedData, macKeys)) {
+	if !hmac.Equal(macs, generateMacs(authenticatedData, macKeys)) {
 		err = BadPassphraseError{}
 		return
 	}
 
 	dst := make([]byte, len(src)-Overhead)
 
-	err = decrypt_data(dst, encryptedData, cipherKeys)
+	err = decryptData(dst, encryptedData, cipherKeys)
 	if err != nil {
 		return
 	}
@@ -310,7 +310,7 @@ func (c *Cipher) Decrypt(src []byte) (res []byte, err error) {
 	return dst, nil
 }
 
-func decrypt_data(dst, data, keys []byte) error {
+func decryptData(dst, data, keys []byte) error {
 	var iv, key []byte
 	var block cipher.Block
 	var stream cipher.Stream
@@ -318,33 +318,33 @@ func decrypt_data(dst, data, keys []byte) error {
 
 	buffer := append([]byte{}, data...)
 
-	iv_offset := IVLen
-	iv = buffer[:iv_offset]
+	ivOffset := IVLen
+	iv = buffer[:ivOffset]
 	key = keys[:cipherKeyLen]
 	block, err = aes.NewCipher(key)
 	if err != nil {
 		return err
 	}
 	stream = cipher.NewCTR(block, iv)
-	stream.XORKeyStream(buffer[iv_offset:], buffer[iv_offset:])
+	stream.XORKeyStream(buffer[ivOffset:], buffer[ivOffset:])
 
-	iv_offset += IVLen
-	iv = buffer[iv_offset-IVLen : iv_offset]
+	ivOffset += IVLen
+	iv = buffer[ivOffset-IVLen : ivOffset]
 	key = keys[cipherKeyLen : cipherKeyLen*2]
 	block, err = twofish.NewCipher(key)
 	if err != nil {
 		return err
 	}
 	stream = cipher.NewCTR(block, iv)
-	stream.XORKeyStream(buffer[iv_offset:], buffer[iv_offset:])
+	stream.XORKeyStream(buffer[ivOffset:], buffer[ivOffset:])
 
-	iv_offset += SalsaIVLen
-	iv = buffer[iv_offset-SalsaIVLen : iv_offset]
-	key_array := new([32]byte)
-	copy(key_array[:], keys[cipherKeyLen*2:])
-	salsa20.XORKeyStream(dst, buffer[iv_offset:], iv, key_array)
+	ivOffset += SalsaIVLen
+	iv = buffer[ivOffset-SalsaIVLen : ivOffset]
+	keyArray := new([32]byte)
+	copy(keyArray[:], keys[cipherKeyLen*2:])
+	salsa20.XORKeyStream(dst, buffer[ivOffset:], iv, keyArray)
 
-	if len(buffer[iv_offset:]) != len(data)-TotalIVLen {
+	if len(buffer[ivOffset:]) != len(data)-TotalIVLen {
 		return fmt.Errorf("something went terribly wrong: bufsz is wrong")
 	}
 
