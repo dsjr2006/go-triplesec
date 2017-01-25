@@ -23,8 +23,10 @@ import (
 	"golang.org/x/crypto/twofish"
 )
 
+// SaltLen determines the size of salt applied to hash functions
 const SaltLen = 16
 
+// Cipher consists of passphrase, salt, and derived key
 type Cipher struct {
 	passphrase []byte
 	salt       []byte
@@ -37,7 +39,7 @@ func scrub(b []byte) {
 	}
 }
 
-// Cipher is an instance of TripleSec using a particular key and
+// NewCipher is an instance of TripleSec using a particular key and
 // a particular salt
 func NewCipher(passphrase []byte, salt []byte) (*Cipher, error) {
 	if salt != nil && len(salt) != SaltLen {
@@ -46,11 +48,13 @@ func NewCipher(passphrase []byte, salt []byte) (*Cipher, error) {
 	return &Cipher{passphrase, salt, nil}, nil
 }
 
+// Scrub zeros out the bytes of the passphrase and derived key in memory
 func (c *Cipher) Scrub() {
 	scrub(c.passphrase)
 	scrub(c.derivedKey)
 }
 
+// SetSalt allows you to set salt programmatically
 func (c *Cipher) SetSalt(salt []byte) error {
 	if len(salt) < SaltLen {
 		return fmt.Errorf("need salt of at least %d bytes", SaltLen)
@@ -59,6 +63,7 @@ func (c *Cipher) SetSalt(salt []byte) error {
 	return nil
 }
 
+// GetSalt creates a new salt from crypto/rand
 func (c *Cipher) GetSalt() ([]byte, error) {
 	if c.salt != nil {
 		return c.salt, nil
@@ -71,6 +76,7 @@ func (c *Cipher) GetSalt() ([]byte, error) {
 	return c.salt, nil
 }
 
+// DeriveKey creates a new derived key
 func (c *Cipher) DeriveKey(extra int) ([]byte, []byte, error) {
 
 	dkLen := DkLen + extra
@@ -85,14 +91,17 @@ func (c *Cipher) DeriveKey(extra int) ([]byte, []byte, error) {
 	return c.derivedKey[0:DkLen], c.derivedKey[DkLen:], nil
 }
 
-// The MagicBytes are the four bytes prefixed to every TripleSec
+// MagicBytes are the four bytes prefixed to every TripleSec
 // ciphertext, 1c 94 d7 de.
 var MagicBytes = [4]byte{0x1c, 0x94, 0xd7, 0xde}
 
+// Version is written to encrypted items to support different implementation versions
 var Version uint32 = 3
 
+// MacOutputLen is used for calculation of Overhead
 const MacOutputLen = 64
 
+// IVLen sets Initialization Vector length
 var (
 	macKeyLen    = 48
 	cipherKeyLen = 32
